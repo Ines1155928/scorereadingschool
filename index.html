@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>五線譜音高認知射擊遊戲 - 速度挑戰版 (含麥克風偵測)</title>
+    <title>五線譜音高認知射擊遊戲 - 速度挑戰版 (含抗噪麥克風)</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -70,7 +70,7 @@
         // 評分設定
         const PENALTY_PER_SECOND = 3; // 每秒扣 3 分
 
-        // --- 全域音效喚醒機制 (暴力破解 iOS Safari 限制) ---
+        // --- 全域音效喚醒機制 ---
         let globalAudioCtx = null;
         const getGlobalAudioContext = () => {
             if (!globalAudioCtx) {
@@ -413,6 +413,7 @@
         const [isMicActive, setIsMicActive] = useState(false);
         const [currentDetectedNote, setCurrentDetectedNote] = useState(null); 
         const [isRecorderMode, setIsRecorderMode] = useState(false); 
+        const [noiseGateUI, setNoiseGateUI] = useState(0.015); // 抗噪門檻 UI 狀態
         // -----------------------
         
         const [combo, setCombo] = useState(0);
@@ -438,6 +439,7 @@
         const matchFramesRef = useRef(0);
         const lastDetectedNoteRef = useRef(null);
         const bufferRef = useRef(new Float32Array(2048));
+        const noiseGateRef = useRef(0.015); // 抗噪門檻實際運作的 Ref
         // -----------------------
 
         const timerRef = useRef(null);
@@ -485,7 +487,8 @@
                 const source = audioCtx.createMediaStreamSource(stream);
                 
                 const micGainNode = audioCtx.createGain();
-                micGainNode.gain.value = 8.0; 
+                // 降低麥克風靈敏度，避免收錄到周圍雜音
+                micGainNode.gain.value = 1.0; 
                 
                 const analyser = audioCtx.createAnalyser();
                 analyser.fftSize = 2048;
@@ -516,11 +519,13 @@
                 
                 const lBar = document.getElementById('lobby-volume-bar');
                 const gBar = document.getElementById('game-volume-bar');
-                const widthStr = Math.min(100, rms * 100 * 8) + '%';
+                // 調整視覺比例配合降噪
+                const widthStr = Math.min(100, rms * 100 * 2) + '%'; 
                 if (lBar) lBar.style.width = widthStr;
                 if (gBar) gBar.style.width = widthStr;
                 
-                if (rms > 0.0015) {
+                // 套用抗噪門檻
+                if (rms > noiseGateRef.current) {
                     const currentFreq = autoCorrelate(bufferRef.current, sampleRate);
                     if (currentFreq !== -1) {
                         const note = noteFromPitch(currentFreq);
@@ -751,7 +756,7 @@
             
             const activeNotes = [...ALL_TREBLE, ...ALL_BASS].filter(n => selectedNoteIds.includes(n.id));
             
-            // --- 💡 全新出題機制：洗牌平均發牌法 ---
+            // --- 全新出題機制：洗牌平均發牌法 ---
             const TOTAL_QUESTIONS = 15; // 遊戲總題數
             let pool = [];
 
@@ -1211,8 +1216,8 @@
                         </h1>
                     </div>
 
-                    {/* --- 大廳麥克風控制面板 --- */}
-                    <div className="absolute right-2 top-14 md:right-4 md:top-16 z-50 flex flex-col items-end gap-2 w-44 md:w-56">
+                    {/* --- 大廳麥克風控制面板 (含抗噪門檻滑桿) --- */}
+                    <div className="absolute right-2 top-14 md:right-4 md:top-16 z-50 flex flex-col items-end gap-2 w-48 md:w-60">
                         <button onClick={toggleMic} className={`w-full py-2 md:py-2.5 rounded-xl font-bold text-xs md:text-sm font-zh border flex justify-center items-center gap-2 transition-all shadow-md ${isMicActive ? 'bg-emerald-500 text-white border-emerald-400 mic-active-pulse' : 'bg-slate-800 text-slate-400 border-slate-600 hover:bg-slate-700 hover:text-white'}`}>
                             {isMicActive ? <Icons.Mic className="w-4 h-4 md:w-5 md:h-5"/> : <Icons.MicOff className="w-4 h-4 md:w-5 md:h-5"/>}
                             <span>{isMicActive ? '麥克風：監聽中' : '開啟樂器偵測'}</span>
@@ -1220,7 +1225,7 @@
                         
                         <div className={`w-full bg-slate-800/90 backdrop-blur-md border rounded-xl p-2.5 transition-all shadow-lg flex flex-col gap-2 ${isMicActive ? 'border-emerald-500/50 opacity-100' : 'border-slate-700 opacity-50'}`}>
                             <div className="flex justify-between items-center text-[10px] md:text-xs font-zh text-slate-300">
-                                <span>收音與音高</span>
+                                <span>收音音量</span>
                                 {currentDetectedNote ? (
                                     <span className="text-emerald-400 font-bold font-mono bg-emerald-900/50 px-1.5 rounded">{currentDetectedNote}</span>
                                 ) : (
@@ -1230,8 +1235,27 @@
                             <div className="w-full h-2 md:h-2.5 bg-slate-900 rounded-full overflow-hidden border border-slate-700/50">
                                 <div id="lobby-volume-bar" className="h-full bg-gradient-to-r from-emerald-500 to-emerald-300 transition-all duration-75" style={{ width: '0%' }}></div>
                             </div>
+
+                            <div className="mt-1">
+                                <div className="flex justify-between text-[9px] md:text-[10px] text-slate-400 font-zh mb-1">
+                                    <span>過濾雜音門檻 (往右更嚴格)</span>
+                                </div>
+                                <input 
+                                    type="range" 
+                                    min="0.005" 
+                                    max="0.08" 
+                                    step="0.001" 
+                                    value={noiseGateUI}
+                                    onChange={(e) => {
+                                        const val = parseFloat(e.target.value);
+                                        setNoiseGateUI(val);
+                                        noiseGateRef.current = val;
+                                    }}
+                                    className="w-full h-1.5 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                                />
+                            </div>
                             
-                            <div className="flex items-center gap-2 mt-1">
+                            <div className="flex items-center gap-2 mt-1 border-t border-slate-700 pt-2">
                                 <input 
                                     type="checkbox" 
                                     id="recorder-mode-checkbox"
@@ -1240,7 +1264,7 @@
                                     className="w-3.5 h-3.5 md:w-4 md:h-4 rounded border-slate-600 accent-emerald-500 cursor-pointer"
                                 />
                                 <label htmlFor="recorder-mode-checkbox" className="text-[10px] md:text-xs font-zh text-slate-300 cursor-pointer select-none">
-                                    高音直笛 (高八度判定)
+                                    高音直笛 (判定降八度)
                                 </label>
                             </div>
                         </div>
