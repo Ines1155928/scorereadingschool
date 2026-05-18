@@ -780,7 +780,7 @@
             }
 
             // 3. 防呆機制
-            if (activeNotes.length > 1) {
+            if (activeNotes.length > 2) {
                 for (let i = 1; i < pool.length; i++) {
                     if (pool[i].id === pool[i - 1].id) {
                         for (let j = i + 1; j < pool.length; j++) {
